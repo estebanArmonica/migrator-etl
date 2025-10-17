@@ -101,50 +101,23 @@ class TiempoRepository:
             # Crear tuplas para búsqueda
             tiempo_tuples = [(data['fecha'], data['hora'], data['minuto']) for data in tiempos_data]
             
-            # Construir consulta para tiempos existentes
-            conditions = []
-            params = {}
-            for i, (fecha, hora, minuto) in enumerate(tiempo_tuples):
-                conditions.append(f"(fecha = :fecha{i} AND hora = :hora{i} AND minuto = :minuto{i})")
-                params[f'fecha{i}'] = fecha
-                params[f'hora{i}'] = hora
-                params[f'minuto{i}'] = minuto
+            # Estrategia 1: Buscar en lotes para evitar MemoryError
+            tiempos_map = {}
+            batch_size = 1000  # Procesar en lotes de 1000
             
-            query = f"""
-                SELECT id_tiempo, fecha, hora, minuto 
-                FROM dim_tiempo 
-                WHERE {' OR '.join(conditions)}
-            """
+            for i in range(0, len(tiempo_tuples), batch_size):
+                batch_tuples = tiempo_tuples[i:i + batch_size]
+                existing_tiempos = self._get_existing_tiempos_batch(session, batch_tuples)
+                tiempos_map.update(existing_tiempos)
             
-            result = session.execute(text(query), params)
-            existing_tiempos = {(row['fecha'], row['hora'], row['minuto']): row['id_tiempo'] 
-                              for row in result}
-            
-            # Insertar nuevos tiempos
-            tiempos_map = existing_tiempos.copy()
+            # Estrategia 2: Insertar nuevos tiempos en lotes
             new_tiempos = [data for data in tiempos_data 
-                         if (data['fecha'], data['hora'], data['minuto']) not in existing_tiempos]
+                         if (data['fecha'], data['hora'], data['minuto']) not in tiempos_map]
             
-            for tiempo in new_tiempos:
-                result = session.execute(
-                    text("""
-                        INSERT INTO dim_tiempo (fecha, hora, minuto, cuarto_hora, clave_anio_mes)
-                        VALUES (:fecha, :hora, :minuto, :cuarto_hora, :clave_anio_mes)
-                        RETURNING id_tiempo
-                    """),
-                    {
-                        'fecha': tiempo['fecha'],
-                        'hora': tiempo['hora'],
-                        'minuto': tiempo['minuto'],
-                        'cuarto_hora': tiempo.get('cuarto_hora', (tiempo['hora'] * 4) + (tiempo['minuto'] // 15)),
-                        'clave_anio_mes': tiempo.get('clave_anio_mes', tiempo['fecha'].strftime('%Y-%m'))
-                    }
-                )
-                
-                tiempo_id = result.scalar()
-                key = (tiempo['fecha'], tiempo['hora'], tiempo['minuto'])
-                tiempos_map[key] = tiempo_id
-                self.logger.debug(f"Tiempo insertado: {key} (ID: {tiempo_id})")
+            for i in range(0, len(new_tiempos), batch_size):
+                batch_new_tiempos = new_tiempos[i:i + batch_size]
+                nuevos_ids = self._insert_new_tiempos_batch(session, batch_new_tiempos)
+                tiempos_map.update(nuevos_ids)
             
             session.commit()
             return tiempos_map
@@ -155,7 +128,70 @@ class TiempoRepository:
             raise
         finally:
             session.close()
-
+    
+    def _get_existing_tiempos_batch(self, session, tiempo_tuples: List[tuple]) -> Dict[tuple, int]:
+        """Busca tiempos existentes en lotes"""
+        if not tiempo_tuples:
+            return {}
+        
+        # Crear tabla temporal con los datos a buscar
+        temp_table_query = """
+            CREATE TEMP TABLE temp_tiempos_search (
+                fecha DATE,
+                hora INTEGER,
+                minuto INTEGER
+            ) ON COMMIT DROP
+        """
+        session.execute(text(temp_table_query))
+        
+        # Insertar datos en la tabla temporal en lotes
+        insert_temp_query = "INSERT INTO temp_tiempos_search (fecha, hora, minuto) VALUES (:fecha, :hora, :minuto)"
+        batch_params = [{'fecha': fecha, 'hora': hora, 'minuto': minuto} 
+                       for fecha, hora, minuto in tiempo_tuples]
+        
+        for i in range(0, len(batch_params), 1000):
+            session.execute(text(insert_temp_query), batch_params[i:i + 1000])
+        
+        # Buscar coincidencias
+        search_query = """
+            SELECT t.id_tiempo, t.fecha, t.hora, t.minuto 
+            FROM dim_tiempo t
+            INNER JOIN temp_tiempos_search ts ON t.fecha = ts.fecha AND t.hora = ts.hora AND t.minuto = ts.minuto
+        """
+        
+        result = session.execute(text(search_query))
+        return {(row['fecha'], row['hora'], row['minuto']): row['id_tiempo'] for row in result}
+    
+    def _insert_new_tiempos_batch(self, session, new_tiempos: List[Dict[str, Any]]) -> Dict[tuple, int]:
+        """Inserta nuevos tiempos en lotes y retorna sus IDs"""
+        if not new_tiempos:
+            return {}
+        
+        nuevos_ids = {}
+        
+        for tiempo in new_tiempos:
+            result = session.execute(
+                text("""
+                    INSERT INTO dim_tiempo (fecha, hora, minuto, cuarto_hora, clave_anio_mes)
+                    VALUES (:fecha, :hora, :minuto, :cuarto_hora, :clave_anio_mes)
+                    RETURNING id_tiempo
+                """),
+                {
+                    'fecha': tiempo['fecha'],
+                    'hora': tiempo['hora'],
+                    'minuto': tiempo['minuto'],
+                    'cuarto_hora': tiempo.get('cuarto_hora', (tiempo['hora'] * 4) + (tiempo['minuto'] // 15)),
+                    'clave_anio_mes': tiempo.get('clave_anio_mes', tiempo['fecha'].strftime('%Y-%m'))
+                }
+            )
+            
+            tiempo_id = result.scalar()
+            key = (tiempo['fecha'], tiempo['hora'], tiempo['minuto'])
+            nuevos_ids[key] = tiempo_id
+            self.logger.debug(f"Tiempo insertado: {key} (ID: {tiempo_id})")
+        
+        return nuevos_ids
+    
 class DataRepository:
     """Repositorio principal para inserción de datos"""
     
