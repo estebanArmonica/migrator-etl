@@ -1,30 +1,29 @@
-import pandas as pd
 import logging
 from typing import List, Dict, Any
 from datetime import datetime
 from tqdm import tqdm
 
-class DataProcessor:
-    """Procesador de datos para la migración"""
+class SimpleDataProcessor:
+    """Procesador de datos sin pandas"""
     
     def __init__(self, data_repository):
         self.repository = data_repository
         self.logger = logging.getLogger(__name__)
     
-    def process_precios_marginales(self, df: pd.DataFrame) -> int:
+    def process_precios_marginales(self, data: List[Dict[str, Any]]) -> int:
         """Procesa y migra datos de precios marginales"""
         self.logger.info("Procesando datos de precios marginales...")
         
         # Extraer datos únicos
-        barras_unicas = df['BARRA'].unique().tolist()
+        barras_unicas = list(set(row['BARRA'] for row in data))
         tiempos_data = []
         
-        for _, row in df.iterrows():
+        for row in data:
             tiempos_data.append({
                 'fecha': row['FECHA'],
-                'hora': int(row['HORA']),
-                'minuto': int(row['MINUTO']),
-                'cuarto_hora': (int(row['HORA']) * 4) + (int(row['MINUTO']) // 15)
+                'hora': row['HORA'],
+                'minuto': row['MINUTO'],
+                'cuarto_hora': (row['HORA'] * 4) + (row['MINUTO'] // 15)
             })
         
         # Obtener mapeos
@@ -34,8 +33,8 @@ class DataProcessor:
         # Preparar datos para inserción
         precios_to_insert = []
         
-        for _, row in tqdm(df.iterrows(), total=len(df), desc="Procesando precios"):
-            tiempo_key = (row['FECHA'], int(row['HORA']), int(row['MINUTO']))
+        for row in tqdm(data, desc="Procesando precios"):
+            tiempo_key = (row['FECHA'], row['HORA'], row['MINUTO'])
             tiempo_id = tiempos_map.get(tiempo_key)
             barra_id = barras_map.get(row['BARRA'])
             
@@ -43,29 +42,29 @@ class DataProcessor:
                 precios_to_insert.append({
                     'tiempo_id': tiempo_id,
                     'barra_id': barra_id,
-                    'cmg_mills_kwh': float(row['CMg[mills/kWh]']),
-                    'cmg_usd_kwh': float(row['CMg[$/KWh]']),
-                    'usd': float(row['USD'])
+                    'cmg_mills_kwh': row['CMg[mills/kWh]'],
+                    'cmg_usd_kwh': row['CMg[$/KWh]'],
+                    'usd': row['USD']
                 })
         
         # Insertar datos
         return self.repository.insert_precios_marginales(precios_to_insert)
     
-    def process_retiros_energia(self, df: pd.DataFrame) -> int:
+    def process_retiros_energia(self, data: List[Dict[str, Any]]) -> int:
         """Procesa y migra datos de retiros de energía"""
         self.logger.info("Procesando datos de retiros de energía...")
         
         # Extraer datos únicos
-        barras_unicas = df['Barra'].unique().tolist()
-        empresas_unicas = df['Suministrador'].unique().tolist() + df['Retiro'].unique().tolist()
+        barras_unicas = list(set(row['Barra'] for row in data))
+        empresas_unicas = list(set(row['Suministrador'] for row in data) | set(row['Retiro'] for row in data))
         
         tiempos_data = []
-        for _, row in df.iterrows():
+        for row in data:
             tiempos_data.append({
                 'fecha': row['Clave Año_Mes'],
-                'hora': (int(row['Cuarto de Hora']) - 1) // 4,
-                'minuto': ((int(row['Cuarto de Hora']) - 1) % 4) * 15,
-                'cuarto_hora': int(row['Cuarto de Hora']),
+                'hora': (row['Cuarto de Hora'] - 1) // 4,
+                'minuto': ((row['Cuarto de Hora'] - 1) % 4) * 15,
+                'cuarto_hora': row['Cuarto de Hora'],
                 'clave_anio_mes': row['Clave Año_Mes'].strftime('%Y-%m')
             })
         
@@ -77,9 +76,9 @@ class DataProcessor:
         # Preparar datos para inserción
         retiros_to_insert = []
         
-        for _, row in tqdm(df.iterrows(), total=len(df), desc="Procesando retiros"):
-            hora = (int(row['Cuarto de Hora']) - 1) // 4
-            minuto = ((int(row['Cuarto de Hora']) - 1) % 4) * 15
+        for row in tqdm(data, desc="Procesando retiros"):
+            hora = (row['Cuarto de Hora'] - 1) // 4
+            minuto = ((row['Cuarto de Hora'] - 1) % 4) * 15
             tiempo_key = (row['Clave Año_Mes'], hora, minuto)
             
             tiempo_id = tiempos_map.get(tiempo_key)
@@ -95,27 +94,27 @@ class DataProcessor:
                     'retiro_id': retiro_id,
                     'clave': row['clave'],
                     'tipo': row['Tipo'],
-                    'medida_kwh': float(row['Medida_kWh'])
+                    'medida_kwh': row['Medida_kWh']
                 })
         
         # Insertar datos
         return self.repository.insert_retiros_energia(retiros_to_insert)
     
-    def process_contratos_fisicos(self, df: pd.DataFrame) -> int:
+    def process_contratos_fisicos(self, data: List[Dict[str, Any]]) -> int:
         """Procesa y migra datos de contratos físicos"""
         self.logger.info("Procesando datos de contratos físicos...")
         
         # Extraer datos únicos
-        barras_unicas = df['Barra'].unique().tolist()
-        empresas_unicas = df['Empresa'].unique().tolist()
+        barras_unicas = list(set(row['Barra'] for row in data))
+        empresas_unicas = list(set(row['Empresa'] for row in data))
         
         tiempos_data = []
-        for _, row in df.iterrows():
+        for row in data:
             tiempos_data.append({
-                'fecha': datetime.now().date(),  # Fecha por defecto, ajustar según datos reales
-                'hora': (int(row['Cuarto de Hora']) - 1) // 4,
-                'minuto': ((int(row['Cuarto de Hora']) - 1) % 4) * 15,
-                'cuarto_hora': int(row['Cuarto de Hora'])
+                'fecha': datetime.now().date(),
+                'hora': (row['Cuarto de Hora'] - 1) // 4,
+                'minuto': ((row['Cuarto de Hora'] - 1) % 4) * 15,
+                'cuarto_hora': row['Cuarto de Hora']
             })
         
         # Obtener mapeos
@@ -126,10 +125,10 @@ class DataProcessor:
         # Preparar datos para inserción
         contratos_to_insert = []
         
-        for _, row in tqdm(df.iterrows(), total=len(df), desc="Procesando contratos"):
-            hora = (int(row['Cuarto de Hora']) - 1) // 4
-            minuto = ((int(row['Cuarto de Hora']) - 1) % 4) * 15
-            tiempo_key = (datetime.now().date(), hora, minuto)  # Ajustar fecha según datos
+        for row in tqdm(data, desc="Procesando contratos"):
+            hora = (row['Cuarto de Hora'] - 1) // 4
+            minuto = ((row['Cuarto de Hora'] - 1) % 4) * 15
+            tiempo_key = (datetime.now().date(), hora, minuto)
             
             tiempo_id = tiempos_map.get(tiempo_key)
             barra_id = barras_map.get(row['Barra'])
@@ -142,10 +141,10 @@ class DataProcessor:
                     'clave': row['clave'],
                     'empresa_id': empresa_id,
                     'transaccion': row['TransacciÃ³n'],
-                    'kwh': float(row['Kwhh']),
-                    'valorizado_clp': float(row['Valorizado_CLP']),
-                    'id_contrato': int(row['Id_Contrato']),
-                    'cmg_peso_kwh': float(row['CMG_PESO_KWH'])
+                    'kwh': row['Kwhh'],
+                    'valorizado_clp': row['Valorizado_CLP'],
+                    'id_contrato': row['Id_Contrato'],
+                    'cmg_peso_kwh': row['CMG_PESO_KWH']
                 })
         
         # Insertar datos
