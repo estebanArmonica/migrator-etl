@@ -4,21 +4,43 @@ from datetime import datetime
 from tqdm import tqdm
 
 class SimpleDataProcessor:
-    """Procesador de datos sin pandas"""
+    """Procesador de datos optimizado para grandes volúmenes"""
     
     def __init__(self, data_repository):
         self.repository = data_repository
         self.logger = logging.getLogger(__name__)
+        self.batch_size = 5000  # Procesar en lotes de 5000 registros
     
     def process_precios_marginales(self, data: List[Dict[str, Any]]) -> int:
-        """Procesa y migra datos de precios marginales"""
+        """Procesa y migra datos de precios marginales en lotes"""
         self.logger.info("Procesando datos de precios marginales...")
         
-        # Extraer datos únicos
-        barras_unicas = list(set(row['BARRA'] for row in data))
+        if not data:
+            self.logger.warning("No hay datos para procesar")
+            return 0
+        
+        total_processed = 0
+        
+        # Procesar en lotes
+        for batch_num, i in enumerate(range(0, len(data), self.batch_size), 1):
+            batch_data = data[i:i + self.batch_size]
+            self.logger.info(f"Procesando lote {batch_num} de precios marginales ({len(batch_data)} registros)")
+            
+            processed_in_batch = self._process_precios_batch(batch_data)
+            total_processed += processed_in_batch
+            
+            self.logger.info(f"Lote {batch_num} completado: {processed_in_batch} registros")
+        
+        self.logger.info(f"Total precios marginales procesados: {total_processed}")
+        return total_processed
+    
+    def _process_precios_batch(self, batch_data: List[Dict[str, Any]]) -> int:
+        """Procesa un lote de datos de precios marginales"""
+        # Extraer datos únicos del lote
+        barras_unicas = list(set(row['BARRA'] for row in batch_data))
         tiempos_data = []
         
-        for row in data:
+        for row in batch_data:
             tiempos_data.append({
                 'fecha': row['FECHA'],
                 'hora': row['HORA'],
@@ -33,7 +55,7 @@ class SimpleDataProcessor:
         # Preparar datos para inserción
         precios_to_insert = []
         
-        for row in tqdm(data, desc="Procesando precios"):
+        for row in batch_data:
             tiempo_key = (row['FECHA'], row['HORA'], row['MINUTO'])
             tiempo_id = tiempos_map.get(tiempo_key)
             barra_id = barras_map.get(row['BARRA'])
@@ -47,19 +69,43 @@ class SimpleDataProcessor:
                     'usd': row['USD']
                 })
         
-        # Insertar datos
-        return self.repository.insert_precios_marginales(precios_to_insert)
+        # Insertar datos del lote
+        if precios_to_insert:
+            return self.repository.insert_precios_marginales(precios_to_insert)
+        return 0
     
     def process_retiros_energia(self, data: List[Dict[str, Any]]) -> int:
-        """Procesa y migra datos de retiros de energía"""
+        """Procesa y migra datos de retiros de energía en lotes"""
         self.logger.info("Procesando datos de retiros de energía...")
         
-        # Extraer datos únicos
-        barras_unicas = list(set(row['Barra'] for row in data))
-        empresas_unicas = list(set(row['Suministrador'] for row in data) | set(row['Retiro'] for row in data))
+        if not data:
+            self.logger.warning("No hay datos para procesar")
+            return 0
+        
+        total_processed = 0
+        
+        # Procesar en lotes
+        for batch_num, i in enumerate(range(0, len(data), self.batch_size), 1):
+            batch_data = data[i:i + self.batch_size]
+            self.logger.info(f"Procesando lote {batch_num} de retiros ({len(batch_data)} registros)")
+            
+            processed_in_batch = self._process_retiros_batch(batch_data)
+            total_processed += processed_in_batch
+            
+            self.logger.info(f"Lote {batch_num} completado: {processed_in_batch} registros")
+        
+        self.logger.info(f"Total retiros procesados: {total_processed}")
+        return total_processed
+    
+    def _process_retiros_batch(self, batch_data: List[Dict[str, Any]]) -> int:
+        """Procesa un lote de datos de retiros de energía"""
+        # Extraer datos únicos del lote
+        barras_unicas = list(set(row['Barra'] for row in batch_data))
+        empresas_unicas = list(set(row['Suministrador'] for row in batch_data) | 
+                              set(row['Retiro'] for row in batch_data))
         
         tiempos_data = []
-        for row in data:
+        for row in batch_data:
             tiempos_data.append({
                 'fecha': row['Clave Año_Mes'],
                 'hora': (row['Cuarto de Hora'] - 1) // 4,
@@ -76,7 +122,7 @@ class SimpleDataProcessor:
         # Preparar datos para inserción
         retiros_to_insert = []
         
-        for row in tqdm(data, desc="Procesando retiros"):
+        for row in batch_data:
             hora = (row['Cuarto de Hora'] - 1) // 4
             minuto = ((row['Cuarto de Hora'] - 1) % 4) * 15
             tiempo_key = (row['Clave Año_Mes'], hora, minuto)
@@ -97,19 +143,42 @@ class SimpleDataProcessor:
                     'medida_kwh': row['Medida_kWh']
                 })
         
-        # Insertar datos
-        return self.repository.insert_retiros_energia(retiros_to_insert)
+        # Insertar datos del lote
+        if retiros_to_insert:
+            return self.repository.insert_retiros_energia(retiros_to_insert)
+        return 0
     
     def process_contratos_fisicos(self, data: List[Dict[str, Any]]) -> int:
-        """Procesa y migra datos de contratos físicos"""
+        """Procesa y migra datos de contratos físicos en lotes"""
         self.logger.info("Procesando datos de contratos físicos...")
         
-        # Extraer datos únicos
-        barras_unicas = list(set(row['Barra'] for row in data))
-        empresas_unicas = list(set(row['Empresa'] for row in data))
+        if not data:
+            self.logger.warning("No hay datos para procesar")
+            return 0
+        
+        total_processed = 0
+        
+        # Procesar en lotes
+        for batch_num, i in enumerate(range(0, len(data), self.batch_size), 1):
+            batch_data = data[i:i + self.batch_size]
+            self.logger.info(f"Procesando lote {batch_num} de contratos ({len(batch_data)} registros)")
+            
+            processed_in_batch = self._process_contratos_batch(batch_data)
+            total_processed += processed_in_batch
+            
+            self.logger.info(f"Lote {batch_num} completado: {processed_in_batch} registros")
+        
+        self.logger.info(f"Total contratos procesados: {total_processed}")
+        return total_processed
+    
+    def _process_contratos_batch(self, batch_data: List[Dict[str, Any]]) -> int:
+        """Procesa un lote de datos de contratos físicos"""
+        # Extraer datos únicos del lote
+        barras_unicas = list(set(row['Barra'] for row in batch_data))
+        empresas_unicas = list(set(row['Empresa'] for row in batch_data))
         
         tiempos_data = []
-        for row in data:
+        for row in batch_data:
             tiempos_data.append({
                 'fecha': datetime.now().date(),
                 'hora': (row['Cuarto de Hora'] - 1) // 4,
@@ -125,7 +194,7 @@ class SimpleDataProcessor:
         # Preparar datos para inserción
         contratos_to_insert = []
         
-        for row in tqdm(data, desc="Procesando contratos"):
+        for row in batch_data:
             hora = (row['Cuarto de Hora'] - 1) // 4
             minuto = ((row['Cuarto de Hora'] - 1) % 4) * 15
             tiempo_key = (datetime.now().date(), hora, minuto)
@@ -147,5 +216,7 @@ class SimpleDataProcessor:
                     'cmg_peso_kwh': row['CMG_PESO_KWH']
                 })
         
-        # Insertar datos
-        return self.repository.insert_contratos_fisicos(contratos_to_insert)
+        # Insertar datos del lote
+        if contratos_to_insert:
+            return self.repository.insert_contratos_fisicos(contratos_to_insert)
+        return 0
