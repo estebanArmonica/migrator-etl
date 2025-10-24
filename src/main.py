@@ -21,49 +21,36 @@ class SimpleMigracionApp:
         self.data_loader = SimpleDataLoader()
         self.data_processor = SimpleDataProcessor(self.data_repository)
     
-    def run_migracion(self, archivos_config: dict):
-        """Ejecuta el proceso completo de migración"""
-        self.logger.info("Iniciando proceso de migración simplificado...")
-        
-        total_registros = 0
-        
+   # En tu función main o donde procesas los retiros
+    def run_migracion(self, archivos_config):
         try:
-            # Migrar Precios Marginales
-            if archivos_config.get('precios_marginales'):
-                self.logger.info("=== MIGRANDO PRECIOS MARGINALES ===")
-                data_precios = self.data_loader.load_precios_marginales(archivos_config['precios_marginales'])
-                if data_precios:
-                    count = self.data_processor.process_precios_marginales(data_precios)
-                    total_registros += count
-                    self.logger.info(f"Precios marginales migrados: {count} registros")
+            self.logger.info("Iniciando proceso de migración simplificado...")
             
-            # Migrar Retiros de Energía
-            if archivos_config.get('retiros_energia'):
-                self.logger.info("=== MIGRANDO RETIROS DE ENERGÍA ===")
-                data_retiros = self.data_loader.load_retiros_energia(archivos_config['retiros_energia'])
-                if data_retiros:
-                    count = self.data_processor.process_retiros_energia(data_retiros)
-                    total_registros += count
-                    self.logger.info(f"Retiros de energía migrados: {count} registros")
+            self.logger.info("=== MIGRANDO PRECIOS MARGINALES ===")
+            data_precios = self.data_loader.load_precios_marginales(archivos_config['precios_marginales'])
+            self.logger.info(f"Precios marginales cargados: {len(data_precios)} registros")
             
-            # Migrar Contratos Físicos
-            if archivos_config.get('contratos_fisicos'):
-                self.logger.info("=== MIGRANDO CONTRATOS FÍSICOS ===")
-                data_contratos = self.data_loader.load_contratos_fisicos(archivos_config['contratos_fisicos'])
-                if data_contratos:
-                    count = self.data_processor.process_contratos_fisicos(data_contratos)
-                    total_registros += count
-                    self.logger.info(f"Contratos físicos migrados: {count} registros")
+            if data_precios:
+                count_precios = self.data_processor.process_precios_marginales(data_precios)
+                self.logger.info(f"Precios marginales migrados: {count_precios} registros")
             
-            self.logger.info(f"=== MIGRACIÓN COMPLETADA ===")
-            self.logger.info(f"Total de registros migrados: {total_registros}")
+            self.logger.info("=== MIGRANDO RETIROS DE ENERGÍA ===")
+            # Agregar timing
+            start_time = datetime.now()
+            data_retiros = self.data_loader.load_retiros_energia(archivos_config['retiros_energia'])
+            load_time = datetime.now() - start_time
+            self.logger.info(f"Retiros de energía cargados en {load_time}: {len(data_retiros)} registros")
+            
+            if data_retiros:
+                start_time = datetime.now()
+                count_retiros = self.data_processor.process_retiros_energia(data_retiros)
+                process_time = datetime.now() - start_time
+                self.logger.info(f"Retiros de energía migrados en {process_time}: {count_retiros} registros")
             
         except Exception as e:
-            self.logger.error(f"Error durante la migración: {e}")
+            self.logger.error(f"Error en el proceso de migración: {e}")
             raise
-        finally:
-            self.db_connection.close()
-
+    
 def main():
     """Función principal simplificada"""
     
