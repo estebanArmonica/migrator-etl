@@ -1,6 +1,6 @@
 import logging
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, date  # Cambio importante aquí
 from tqdm import tqdm
 
 class SimpleDataProcessor:
@@ -101,45 +101,55 @@ class SimpleDataProcessor:
         """Procesa un lote de datos de retiros de energía"""
         # Extraer datos únicos del lote
         barras_unicas = list(set(row['Barra'] for row in batch_data))
-        empresas_unicas = list(set(row['Suministrador'] for row in batch_data) | 
-                              set(row['Retiro'] for row in batch_data))
         
         tiempos_data = []
         for row in batch_data:
+            
+            # Asegurarse de que la fecha está parseada correctamente
+            fecha = row.get('Clave Año_Mes') or row.get('Clave AÃ±o_Mes')
+            
+            # CORRECCIÓN: Usar 'date' en lugar de 'datetime.date'
+            if not isinstance(fecha, date):
+                self.logger.warning(f"Fecha no parseada correctamente: {fecha}")
+                continue
+            
             tiempos_data.append({
-                'fecha': row['Clave Año_Mes'],
+                'fecha': fecha,
                 'hora': (row['Cuarto de Hora'] - 1) // 4,
                 'minuto': ((row['Cuarto de Hora'] - 1) % 4) * 15,
                 'cuarto_hora': row['Cuarto de Hora'],
-                'clave_anio_mes': row['Clave Año_Mes'].strftime('%Y-%m')
+                'clave_anio_mes': fecha.strftime('%Y-%m')
             })
         
         # Obtener mapeos
         barras_map = self.repository.barra_repo.insert_or_get_barras(barras_unicas)
-        empresas_map = self.repository.empresa_repo.insert_or_get_empresas(empresas_unicas)
         tiempos_map = self.repository.tiempo_repo.insert_or_get_tiempos(tiempos_data)
         
         # Preparar datos para inserción
         retiros_to_insert = []
         
         for row in batch_data:
+            fecha = row.get('Clave Año_Mes') or row.get('Clave AÃ±o_Mes')
+            # CORRECCIÓN: Usar 'date' en lugar de 'datetime.date'
+            if not isinstance(fecha, date):
+                continue
+            
             hora = (row['Cuarto de Hora'] - 1) // 4
             minuto = ((row['Cuarto de Hora'] - 1) % 4) * 15
-            tiempo_key = (row['Clave Año_Mes'], hora, minuto)
+            tiempo_key = (fecha, hora, minuto)
             
             tiempo_id = tiempos_map.get(tiempo_key)
             barra_id = barras_map.get(row['Barra'])
-            suministrador_id = empresas_map.get(row['Suministrador'])
-            retiro_id = empresas_map.get(row['Retiro'])
             
-            if all([tiempo_id, barra_id, suministrador_id, retiro_id]):
+            if all([tiempo_id, barra_id]):
                 retiros_to_insert.append({
                     'tiempo_id': tiempo_id,
                     'barra_id': barra_id,
-                    'suministrador_id': suministrador_id,
-                    'retiro_id': retiro_id,
+                    'suministrador': row['Suministrador'],
+                    'retiro': row['Retiro'],
                     'clave': row['clave'],
                     'tipo': row['Tipo'],
+                    'clave_anio_mes': fecha.strftime('%Y-%m'),
                     'medida_kwh': row['Medida_kWh']
                 })
         
@@ -175,7 +185,6 @@ class SimpleDataProcessor:
         """Procesa un lote de datos de contratos físicos"""
         # Extraer datos únicos del lote
         barras_unicas = list(set(row['Barra'] for row in batch_data))
-        empresas_unicas = list(set(row['Empresa'] for row in batch_data))
         
         tiempos_data = []
         for row in batch_data:
@@ -188,7 +197,6 @@ class SimpleDataProcessor:
         
         # Obtener mapeos
         barras_map = self.repository.barra_repo.insert_or_get_barras(barras_unicas)
-        empresas_map = self.repository.empresa_repo.insert_or_get_empresas(empresas_unicas)
         tiempos_map = self.repository.tiempo_repo.insert_or_get_tiempos(tiempos_data)
         
         # Preparar datos para inserción
@@ -201,14 +209,13 @@ class SimpleDataProcessor:
             
             tiempo_id = tiempos_map.get(tiempo_key)
             barra_id = barras_map.get(row['Barra'])
-            empresa_id = empresas_map.get(row['Empresa'])
             
-            if all([tiempo_id, barra_id, empresa_id]):
+            if all([tiempo_id, barra_id]):
                 contratos_to_insert.append({
                     'tiempo_id': tiempo_id,
                     'barra_id': barra_id,
                     'clave': row['clave'],
-                    'empresa_id': empresa_id,
+                    'nom_empresa': row['Empresa'],
                     'transaccion': row['TransacciÃ³n'],
                     'kwh': row['Kwhh'],
                     'valorizado_clp': row['Valorizado_CLP'],
